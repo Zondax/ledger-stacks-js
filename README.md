@@ -13,27 +13,27 @@ We recommend using the npmjs package to receive updates/fixes.
 
 ```bash
 # Build the project
-yarn build
+pnpm build
 
 # Format code and sort package.json
-yarn format
+pnpm format
 
 # Check formatting
-yarn format:check
+pnpm format:check
 
 # Run linter
-yarn lint
+pnpm lint
 
 # Fix linting issues
-yarn lint:fix
+pnpm lint:fix
 
 # Run tests (builds first)
-yarn test
+pnpm test
 
 # Check for dependency updates
-yarn upgrade
+pnpm upgrade
 ```
 
 ## Notes
 
-Use `yarn install` to avoid issues.
+Use `pnpm install` to avoid issues.
