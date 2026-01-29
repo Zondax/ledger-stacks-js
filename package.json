@@ -41,6 +41,7 @@
   "devDependencies": {
     "@blockstack/prettier-config": "^0.0.6",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
+    "@types/jest": "^30.0.0",
     "@types/node": "^25.1.0",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "bip32": "^5.0.0",
@@ -53,8 +54,10 @@
     "eslint-plugin-tsdoc": "^0.5.0",
     "eslint-plugin-unused-imports": "^4.3.0",
     "index.js": "^0.0.3",
+    "jest": "^30.2.0",
     "prettier": "^3.8.1",
     "sort-package-json": "^3.6.1",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.9.3"
   },
   "publishConfig": {
