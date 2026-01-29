@@ -86,15 +86,15 @@ export default class StacksApp {
     return chunks
   }
 
-  async signGetChunks(path: string, message: Buffer) {
+  signGetChunks(path: string, message: Buffer) {
     return StacksApp.prepareChunks(serializePath(path), message)
   }
 
-  async getVersion(): Promise<ResponseVersion> {
+  getVersion(): Promise<ResponseVersion> {
     return getVersion(this.transport).catch(err => processErrorResponse(err))
   }
 
-  async getAppInfo(): Promise<ResponseAppInfo> {
+  getAppInfo(): Promise<ResponseAppInfo> {
     return this.transport.send(0xb0, 0x01, 0, 0).then(response => {
       const errorCodeData = response.slice(-2)
       const returnCode = (errorCodeData[0] ?? 0) * 256 + (errorCodeData[1] ?? 0)
@@ -133,31 +133,31 @@ export default class StacksApp {
         flagLen,
         flagsValue,
         flagRecovery: (flagsValue & 1) !== 0,
-        // eslint-disable-next-line no-bitwise
+
         flagSignedMcuCode: (flagsValue & 2) !== 0,
-        // eslint-disable-next-line no-bitwise
+
         flagOnboarded: (flagsValue & 4) !== 0,
-        // eslint-disable-next-line no-bitwise
+
         flagPINValidated: (flagsValue & 128) !== 0,
       }
     }, processErrorResponse)
   }
 
-  async getAddressAndPubKey(path: string, version: AddressVersion): Promise<ResponseAddress> {
+  getAddressAndPubKey(path: string, version: AddressVersion): Promise<ResponseAddress> {
     const serializedPath = serializePath(path)
     return this.transport
       .send(CLA, INS.GET_ADDR_SECP256K1, P1_VALUES.ONLY_RETRIEVE, version, serializedPath, [0x9000])
       .then(processGetAddrResponse, processErrorResponse)
   }
 
-  async getIdentityPubKey(path: string): Promise<ResponseAddress> {
+  getIdentityPubKey(path: string): Promise<ResponseAddress> {
     const serializedPath = serializePath(path)
     return this.transport
       .send(CLA, INS.GET_AUTH_PUBKEY, P1_VALUES.ONLY_RETRIEVE, 0, serializedPath, [0x9000])
       .then(processGetAddrResponse, processErrorResponse)
   }
 
-  async getMasterFingerprint(): Promise<ResponseMasterFingerprint> {
+  getMasterFingerprint(): Promise<ResponseMasterFingerprint> {
     return this.transport.send(CLA, INS.GET_MASTER_FINGERPRINT, 0, 0, Buffer.alloc(0), [LedgerError.NoErrors]).then((response: Buffer) => {
       const errorCodeData = response.slice(-2)
       const returnCode = (errorCodeData[0] ?? 0) * 256 + (errorCodeData[1] ?? 0)
@@ -180,14 +180,14 @@ export default class StacksApp {
     }, processErrorResponse)
   }
 
-  async showAddressAndPubKey(path: string, version: AddressVersion): Promise<ResponseAddress> {
+  showAddressAndPubKey(path: string, version: AddressVersion): Promise<ResponseAddress> {
     const serializedPath = serializePath(path)
     return this.transport
       .send(CLA, INS.GET_ADDR_SECP256K1, P1_VALUES.SHOW_ADDRESS_IN_DEVICE, version, serializedPath, [LedgerError.NoErrors])
       .then(processGetAddrResponse, processErrorResponse)
   }
 
-  async signSendChunk(chunkIdx: number, chunkNum: number, chunk: Buffer, ins: number): Promise<ResponseSign> {
+  signSendChunk(chunkIdx: number, chunkNum: number, chunk: Buffer, ins: number): Promise<ResponseSign> {
     let payloadType = PAYLOAD_TYPE.ADD
     if (chunkIdx === 1) {
       payloadType = PAYLOAD_TYPE.INIT
@@ -207,7 +207,6 @@ export default class StacksApp {
         const errorCodeData = response.slice(-2)
         const returnCode = (errorCodeData[0] ?? 0) * 256 + (errorCodeData[1] ?? 0)
         let errorMessage = errorCodeToString(returnCode)
-        let errorDescription = ''
 
         let postSignHash = Buffer.alloc(0)
         let signatureCompact = Buffer.alloc(0)
@@ -247,100 +246,111 @@ export default class StacksApp {
   }
 
   async sign(path: string, message: Buffer) {
-    return this.signGetChunks(path, message).then(chunks => {
-      return this.signSendChunk(1, chunks.length, chunks[0]!, INS.SIGN_SECP256K1).then(async response => {
-        let result = {
-          returnCode: response.returnCode,
-          errorMessage: response.errorMessage,
-          postSignHash: null as null | Buffer,
-          signatureCompact: null as null | Buffer,
-          signatureDER: null as null | Buffer,
+    try {
+      const chunks = this.signGetChunks(path, message)
+      let result = {
+        returnCode: 0,
+        errorMessage: '',
+        postSignHash: null as null | Buffer,
+        signatureCompact: null as null | Buffer,
+        signatureDER: null as null | Buffer,
+      }
+      const response = await this.signSendChunk(1, chunks.length, chunks[0]!, INS.SIGN_SECP256K1)
+      result.returnCode = response.returnCode
+      result.errorMessage = response.errorMessage
+      for (let i = 1; i < chunks.length; i += 1) {
+        result = await this.signSendChunk(1 + i, chunks.length, chunks[i]!, INS.SIGN_SECP256K1)
+        if (result.returnCode !== LedgerError.NoErrors) {
+          break
         }
-        for (let i = 1; i < chunks.length; i += 1) {
-          // eslint-disable-next-line no-await-in-loop
-          result = await this.signSendChunk(1 + i, chunks.length, chunks[i]!, INS.SIGN_SECP256K1)
-          if (result.returnCode !== LedgerError.NoErrors) {
-            break
-          }
-        }
-        return result
-      }, processErrorResponse)
-    }, processErrorResponse)
+      }
+      return result
+    } catch (e) {
+      return processErrorResponse(e)
+    }
   }
 
   async sign_msg(path: string, message: string) {
-    const len = Buffer.from(encode(message.length).buffer)
-    const stacks_message = '\x17Stacks Signed Message:\n'
-    const blob = Buffer.concat([Buffer.from(stacks_message), len, Buffer.from(message)])
-    const ins = INS.SIGN_SECP256K1
-    return this.signGetChunks(path, blob).then(chunks => {
-      return this.signSendChunk(1, chunks.length, chunks[0]!, ins).then(async response => {
-        let result = {
-          returnCode: response.returnCode,
-          errorMessage: response.errorMessage,
-          postSignHash: null as null | Buffer,
-          signatureCompact: null as null | Buffer,
-          signatureDER: null as null | Buffer,
+    try {
+      const len = Buffer.from(encode(message.length).buffer)
+      const stacks_message = '\x17Stacks Signed Message:\n'
+      const blob = Buffer.concat([Buffer.from(stacks_message), len, Buffer.from(message)])
+      const ins = INS.SIGN_SECP256K1
+      const chunks = this.signGetChunks(path, blob)
+      let result = {
+        returnCode: 0,
+        errorMessage: '',
+        postSignHash: null as null | Buffer,
+        signatureCompact: null as null | Buffer,
+        signatureDER: null as null | Buffer,
+      }
+      const response = await this.signSendChunk(1, chunks.length, chunks[0]!, ins)
+      result.returnCode = response.returnCode
+      result.errorMessage = response.errorMessage
+      for (let i = 1; i < chunks.length; i += 1) {
+        result = await this.signSendChunk(1 + i, chunks.length, chunks[i]!, ins)
+        if (result.returnCode !== LedgerError.NoErrors) {
+          break
         }
-        for (let i = 1; i < chunks.length; i += 1) {
-          // eslint-disable-next-line no-await-in-loop
-          result = await this.signSendChunk(1 + i, chunks.length, chunks[i]!, ins)
-          if (result.returnCode !== LedgerError.NoErrors) {
-            break
-          }
-        }
-        return result
-      }, processErrorResponse)
-    }, processErrorResponse)
+      }
+      return result
+    } catch (e) {
+      return processErrorResponse(e)
+    }
   }
 
   async sign_jwt(path: string, message: string) {
-    const len = message.length
-    const blob = Buffer.from(message)
-    const ins = INS.SIGN_JWT_SECP256K1
-    return this.signGetChunks(path, blob).then(chunks => {
-      return this.signSendChunk(1, chunks.length, chunks[0]!, ins).then(async response => {
-        let result = {
-          returnCode: response.returnCode,
-          errorMessage: response.errorMessage,
-          postSignHash: null as null | Buffer,
-          signatureCompact: null as null | Buffer,
-          signatureDER: null as null | Buffer,
+    try {
+      const blob = Buffer.from(message)
+      const ins = INS.SIGN_JWT_SECP256K1
+      const chunks = this.signGetChunks(path, blob)
+      let result = {
+        returnCode: 0,
+        errorMessage: '',
+        postSignHash: null as null | Buffer,
+        signatureCompact: null as null | Buffer,
+        signatureDER: null as null | Buffer,
+      }
+      const response = await this.signSendChunk(1, chunks.length, chunks[0]!, ins)
+      result.returnCode = response.returnCode
+      result.errorMessage = response.errorMessage
+      for (let i = 1; i < chunks.length; i += 1) {
+        result = await this.signSendChunk(1 + i, chunks.length, chunks[i]!, ins)
+        if (result.returnCode !== LedgerError.NoErrors) {
+          break
         }
-        for (let i = 1; i < chunks.length; i += 1) {
-          // eslint-disable-next-line no-await-in-loop
-          result = await this.signSendChunk(1 + i, chunks.length, chunks[i]!, ins)
-          if (result.returnCode !== LedgerError.NoErrors) {
-            break
-          }
-        }
-        return result
-      }, processErrorResponse)
-    }, processErrorResponse)
+      }
+      return result
+    } catch (e) {
+      return processErrorResponse(e)
+    }
   }
 
   async sign_structured_msg(path: string, domain: string, message: string) {
-    const header = 'SIP018'
-    const blob = Buffer.concat([Buffer.from(header), Buffer.from(domain, 'hex'), Buffer.from(message, 'hex')])
-    const ins = INS.SIGN_SECP256K1
-    return this.signGetChunks(path, blob).then(chunks => {
-      return this.signSendChunk(1, chunks.length, chunks[0]!, ins).then(async response => {
-        let result = {
-          returnCode: response.returnCode,
-          errorMessage: response.errorMessage,
-          postSignHash: null as null | Buffer,
-          signatureCompact: null as null | Buffer,
-          signatureDER: null as null | Buffer,
+    try {
+      const header = 'SIP018'
+      const blob = Buffer.concat([Buffer.from(header), Buffer.from(domain, 'hex'), Buffer.from(message, 'hex')])
+      const ins = INS.SIGN_SECP256K1
+      const chunks = this.signGetChunks(path, blob)
+      let result = {
+        returnCode: 0,
+        errorMessage: '',
+        postSignHash: null as null | Buffer,
+        signatureCompact: null as null | Buffer,
+        signatureDER: null as null | Buffer,
+      }
+      const response = await this.signSendChunk(1, chunks.length, chunks[0]!, ins)
+      result.returnCode = response.returnCode
+      result.errorMessage = response.errorMessage
+      for (let i = 1; i < chunks.length; i += 1) {
+        result = await this.signSendChunk(1 + i, chunks.length, chunks[i]!, ins)
+        if (result.returnCode !== LedgerError.NoErrors) {
+          break
         }
-        for (let i = 1; i < chunks.length; i += 1) {
-          // eslint-disable-next-line no-await-in-loop
-          result = await this.signSendChunk(1 + i, chunks.length, chunks[i]!, ins)
-          if (result.returnCode !== LedgerError.NoErrors) {
-            break
-          }
-        }
-        return result
-      }, processErrorResponse)
-    }, processErrorResponse)
+      }
+      return result
+    } catch (e) {
+      return processErrorResponse(e)
+    }
   }
 }

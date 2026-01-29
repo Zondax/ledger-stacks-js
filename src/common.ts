@@ -78,7 +78,9 @@ export const ERROR_DESCRIPTION = {
 }
 
 export function errorCodeToString(statusCode: LedgerError) {
-  if (statusCode in ERROR_DESCRIPTION) return ERROR_DESCRIPTION[statusCode]
+  if (statusCode in ERROR_DESCRIPTION) {
+    return ERROR_DESCRIPTION[statusCode]
+  }
   return `Unknown Status Code: ${statusCode}`
 }
 
@@ -112,16 +114,14 @@ export function processErrorResponse(response?: any) {
   }
 }
 
-export async function getVersion(transport: Transport) {
+export function getVersion(transport: Transport) {
   return transport.send(CLA, INS.GET_VERSION, 0, 0).then(response => {
     const errorCodeData = response.slice(-2)
     const returnCode = ((errorCodeData[0] ?? 0) * 256 + (errorCodeData[1] ?? 0)) as LedgerError
 
     let targetId = 0
     if (response.length >= 9) {
-      /* eslint-disable no-bitwise */
       targetId = ((response[5] ?? 0) << 24) + ((response[6] ?? 0) << 16) + ((response[7] ?? 0) << 8) + ((response[8] ?? 0) << 0)
-      /* eslint-enable no-bitwise */
     }
 
     return {
