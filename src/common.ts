@@ -12,7 +12,21 @@ export const INS = {
   SIGN_JWT_SECP256K1: 0x04,
   SIGN_STRUCTURED_MSG: 0x05,
   GET_MASTER_FINGERPRINT: 0x06,
+  GET_ADDR_MULTISIG: 0x07,
 }
+
+// Multisig hash modes accepted by the device for address verification.
+// Sequential and non-sequential P2SH derive the *same* address (identical
+// redeem script / Hash160); they differ only in how the transaction is later
+// signed. SegWit modes (P2WSH / P2WSH non-sequential) are not supported.
+export const MULTISIG_HASH_MODE = {
+  P2SH: 0x01,
+  P2SH_NONSEQUENTIAL: 0x05,
+}
+
+// OP_CHECKMULTISIG supports up to 15 keys, but the device currently only
+// accepts what fits in a single APDU (path + header + (n-1) cosigner keys).
+export const MULTISIG_MAX_PUBKEYS = 7
 
 export const PAYLOAD_TYPE = {
   INIT: 0x00,

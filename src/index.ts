@@ -24,6 +24,8 @@ import {
   CLA,
   INS,
   LedgerError,
+  MULTISIG_HASH_MODE,
+  MULTISIG_MAX_PUBKEYS,
   P1_VALUES,
   PAYLOAD_TYPE,
   PKLEN,
@@ -32,7 +34,7 @@ import {
   processErrorResponse,
 } from './common'
 import { serializePath } from './helper'
-import { ResponseAddress, ResponseAppInfo, ResponseMasterFingerprint, ResponseSign, ResponseVersion } from './types'
+import { MultisigAddressOptions, ResponseAddress, ResponseAppInfo, ResponseMasterFingerprint, ResponseSign, ResponseVersion } from './types'
 
 export { LedgerError }
 export * from './types'
@@ -54,6 +56,36 @@ function processGetAddrResponse(response: Buffer) {
     returnCode,
     errorMessage: errorCodeToString(returnCode),
   }
+}
+
+// Builds the GET_ADDR_MULTISIG payload:
+//   path(20) | hash_mode(1) | m(1) | n(1) | device_index(1) | cosigner keys ((n-1) * 33)
+// The device derives its own key and splices it in at `deviceKeyIndex`, so the
+// caller only supplies the OTHER cosigner keys (ordered, device slot omitted).
+function serializeMultisig(path: string, options: MultisigAddressOptions): Buffer {
+  const { numRequired, deviceKeyIndex, cosignerPublicKeys } = options
+  const hashMode = options.hashMode ?? MULTISIG_HASH_MODE.P2SH
+
+  const cosigners = cosignerPublicKeys.map(k => (Buffer.isBuffer(k) ? k : Buffer.from(k, 'hex')))
+  const numPubkeys = cosigners.length + 1
+
+  if (numPubkeys < 1 || numPubkeys > MULTISIG_MAX_PUBKEYS) {
+    throw new Error(`Unsupported number of keys: ${numPubkeys} (1..${MULTISIG_MAX_PUBKEYS})`)
+  }
+  if (numRequired < 1 || numRequired > numPubkeys) {
+    throw new Error(`Invalid threshold: ${numRequired} of ${numPubkeys}`)
+  }
+  if (deviceKeyIndex < 0 || deviceKeyIndex >= numPubkeys) {
+    throw new Error(`deviceKeyIndex ${deviceKeyIndex} out of range (0..${numPubkeys - 1})`)
+  }
+  cosigners.forEach((k, i) => {
+    if (k.length !== PKLEN) {
+      throw new Error(`Cosigner key ${i} must be a ${PKLEN}-byte compressed public key`)
+    }
+  })
+
+  const header = Buffer.from([hashMode, numRequired, numPubkeys, deviceKeyIndex])
+  return Buffer.concat([serializePath(path), header, ...cosigners])
 }
 
 export default class StacksApp {
@@ -184,6 +216,28 @@ export default class StacksApp {
     const serializedPath = serializePath(path)
     return this.transport
       .send(CLA, INS.GET_ADDR_SECP256K1, P1_VALUES.SHOW_ADDRESS_IN_DEVICE, version, serializedPath, [LedgerError.NoErrors])
+      .then(processGetAddrResponse, processErrorResponse)
+  }
+
+  /**
+   * Derive a multisig (P2SH) address. The device derives its own key from
+   * `path` and combines it with the supplied cosigner keys to compute the
+   * address; the response's `publicKey` is this device's own key.
+   *
+   * `version` is the c32 multisig version byte (20 mainnet `SM…`, 21 testnet `SN…`).
+   */
+  getMultisigAddressAndPubKey(path: string, version: AddressVersion, options: MultisigAddressOptions): Promise<ResponseAddress> {
+    const data = serializeMultisig(path, options)
+    return this.transport
+      .send(CLA, INS.GET_ADDR_MULTISIG, P1_VALUES.ONLY_RETRIEVE, version, data, [LedgerError.NoErrors])
+      .then(processGetAddrResponse, processErrorResponse)
+  }
+
+  /** Same as {@link getMultisigAddressAndPubKey} but shows the address on-device for verification. */
+  showMultisigAddressAndPubKey(path: string, version: AddressVersion, options: MultisigAddressOptions): Promise<ResponseAddress> {
+    const data = serializeMultisig(path, options)
+    return this.transport
+      .send(CLA, INS.GET_ADDR_MULTISIG, P1_VALUES.SHOW_ADDRESS_IN_DEVICE, version, data, [LedgerError.NoErrors])
       .then(processGetAddrResponse, processErrorResponse)
   }
 
