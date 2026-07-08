@@ -12,7 +12,21 @@ export const INS = {
   SIGN_JWT_SECP256K1: 0x04,
   SIGN_STRUCTURED_MSG: 0x05,
   GET_MASTER_FINGERPRINT: 0x06,
+  GET_ADDR_MULTISIG: 0x07,
 }
+
+// Multisig hash modes accepted by the device for address verification.
+// Sequential and non-sequential P2SH derive the *same* address (identical
+// redeem script / Hash160); they differ only in how the transaction is later
+// signed. SegWit modes (P2WSH / P2WSH non-sequential) are not supported.
+export const MULTISIG_HASH_MODE = {
+  P2SH: 0x01,
+  P2SH_NONSEQUENTIAL: 0x05,
+}
+
+// The 520-byte P2SH redeem-script limit caps a Stacks multisig at 15 compressed
+// keys (matches stacks.js). The header + cosigner keys are sent chunked.
+export const MULTISIG_MAX_PUBKEYS = 15
 
 export const PAYLOAD_TYPE = {
   INIT: 0x00,
