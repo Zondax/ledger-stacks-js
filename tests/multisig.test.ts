@@ -22,8 +22,8 @@ function makeApp() {
   return { app: new StacksApp(transport), calls }
 }
 
-describe('multisig address APDU', () => {
-  test('builds 2-of-3 payload (retrieve)', async () => {
+describe('multisig address APDU (chunked)', () => {
+  test('2-of-3: INIT carries the path, LAST carries the header + keys', async () => {
     const { app, calls } = makeApp()
     await app.getMultisigAddressAndPubKey(PATH, 20 as any, {
       numRequired: 2,
@@ -31,33 +31,43 @@ describe('multisig address APDU', () => {
       cosignerPublicKeys: [COSIGNER_0, COSIGNER_1],
     })
 
-    expect(calls).toHaveLength(1)
-    const { cla, ins, p1, p2, data } = calls[0]
-    expect(cla).toBe(CLA)
-    expect(ins).toBe(INS_GET_ADDR_MULTISIG)
-    expect(p1).toBe(0x00) // retrieve only
-    expect(p2).toBe(20) // mainnet multisig version
+    expect(calls).toHaveLength(2)
 
-    // path(20) | hash_mode | m | n | device_index | cosigner0(33) | cosigner1(33)
-    expect(data.length).toBe(20 + 4 + 33 * 2)
-    expect(data[20]).toBe(0x01) // P2SH
-    expect(data[21]).toBe(2) // m
-    expect(data[22]).toBe(3) // n
-    expect(data[23]).toBe(1) // device index
-    expect(data.subarray(24, 57).toString('hex')).toBe(COSIGNER_0)
-    expect(data.subarray(57, 90).toString('hex')).toBe(COSIGNER_1)
+    // INIT chunk: the device path only
+    expect(calls[0].cla).toBe(CLA)
+    expect(calls[0].ins).toBe(INS_GET_ADDR_MULTISIG)
+    expect(calls[0].p1).toBe(0x00) // INIT
+    expect(calls[0].p2).toBe(0x00)
+    expect(calls[0].data.length).toBe(20) // serialized path
+
+    // LAST chunk: confirm | version | hash_mode | m | n | device_index | keys
+    const last = calls[1]
+    expect(last.p1).toBe(0x02) // LAST
+    expect(last.p2).toBe(0x00)
+    expect(last.data.length).toBe(6 + 33 * 2)
+    expect(last.data[0]).toBe(0) // confirm = retrieve
+    expect(last.data[1]).toBe(20) // version (mainnet multisig)
+    expect(last.data[2]).toBe(0x01) // P2SH
+    expect(last.data[3]).toBe(2) // m
+    expect(last.data[4]).toBe(3) // n
+    expect(last.data[5]).toBe(1) // device index
+    expect(last.data.subarray(6, 39).toString('hex')).toBe(COSIGNER_0)
+    expect(last.data.subarray(39, 72).toString('hex')).toBe(COSIGNER_1)
   })
 
-  test('show uses P1=1', async () => {
+  test('show sets confirm=1 and version in the payload', async () => {
     const { app, calls } = makeApp()
     await app.showMultisigAddressAndPubKey(PATH, 21 as any, {
       numRequired: 1,
       deviceKeyIndex: 0,
       cosignerPublicKeys: [COSIGNER_0],
     })
-    expect(calls[0].p1).toBe(0x01)
-    expect(calls[0].p2).toBe(21)
-    expect(calls[0].data[22]).toBe(2) // n = 1 cosigner + device
+    expect(calls).toHaveLength(2)
+    expect(calls[0].p1).toBe(0x00) // INIT
+    expect(calls[1].p1).toBe(0x02) // LAST
+    expect(calls[1].data[0]).toBe(1) // confirm = show
+    expect(calls[1].data[1]).toBe(21) // testnet multisig version
+    expect(calls[1].data[4]).toBe(2) // n = 1 cosigner + device
   })
 
   test('accepts Buffer cosigner keys', async () => {
@@ -67,20 +77,37 @@ describe('multisig address APDU', () => {
       deviceKeyIndex: 2,
       cosignerPublicKeys: [Buffer.from(COSIGNER_0, 'hex'), Buffer.from(COSIGNER_1, 'hex')],
     })
-    expect(calls[0].data[23]).toBe(2)
+    expect(calls[1].data[5]).toBe(2) // device index
   })
 
-  test('non-sequential hash mode (0x05) serializes into the header', async () => {
+  test('non-sequential hash mode (0x05) travels in the header', async () => {
     const { app, calls } = makeApp()
-    // Non-sequential P2SH derives the same address as sequential P2SH, so the
-    // device accepts it; only the hash-mode byte in the header changes.
     await app.getMultisigAddressAndPubKey(PATH, 20 as any, {
       numRequired: 2,
       deviceKeyIndex: 1,
       cosignerPublicKeys: [COSIGNER_0, COSIGNER_1],
       hashMode: 0x05,
     })
-    expect(calls[0].data[20]).toBe(0x05) // P2SH non-sequential
+    expect(calls[1].data[2]).toBe(0x05)
+  })
+
+  test('large key sets are split across multiple chunks', async () => {
+    const { app, calls } = makeApp()
+    // 14 cosigners + device = 15 keys; body = 6 + 14*33 = 468 bytes > CHUNK_SIZE (250)
+    const cosigners = Array(14).fill(COSIGNER_0)
+    await app.getMultisigAddressAndPubKey(PATH, 20 as any, {
+      numRequired: 15,
+      deviceKeyIndex: 0,
+      cosignerPublicKeys: cosigners,
+    })
+    // INIT (path) + ADD + LAST
+    expect(calls.map((c: any) => c.p1)).toEqual([0x00, 0x01, 0x02])
+    expect(calls[0].data.length).toBe(20)
+    // reassembled body = header(6) + 14*33
+    const body = Buffer.concat([calls[1].data, calls[2].data])
+    expect(body.length).toBe(6 + 14 * 33)
+    expect(body[3]).toBe(15) // m
+    expect(body[4]).toBe(15) // n
   })
 
   test.each([
@@ -88,10 +115,10 @@ describe('multisig address APDU', () => {
     ['threshold zero', { numRequired: 0, deviceKeyIndex: 0, cosignerPublicKeys: [COSIGNER_0] }],
     ['device index out of range', { numRequired: 1, deviceKeyIndex: 2, cosignerPublicKeys: [COSIGNER_0] }],
     ['bad key length', { numRequired: 1, deviceKeyIndex: 0, cosignerPublicKeys: ['00'] }],
-    ['too many keys', { numRequired: 1, deviceKeyIndex: 0, cosignerPublicKeys: Array(7).fill(COSIGNER_0) }],
+    ['too many keys', { numRequired: 1, deviceKeyIndex: 0, cosignerPublicKeys: Array(15).fill(COSIGNER_0) }],
   ])('rejects %s', (_name, options) => {
     const { app } = makeApp()
-    // Input validation fails fast (synchronously), matching serializePath's convention.
+    // Input validation fails fast (synchronously), before any chunk is sent.
     expect(() => app.getMultisigAddressAndPubKey(PATH, 20 as any, options as any)).toThrow()
   })
 })

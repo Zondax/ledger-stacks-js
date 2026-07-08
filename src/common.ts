@@ -24,9 +24,9 @@ export const MULTISIG_HASH_MODE = {
   P2SH_NONSEQUENTIAL: 0x05,
 }
 
-// OP_CHECKMULTISIG supports up to 15 keys, but the device currently only
-// accepts what fits in a single APDU (path + header + (n-1) cosigner keys).
-export const MULTISIG_MAX_PUBKEYS = 7
+// The 520-byte P2SH redeem-script limit caps a Stacks multisig at 15 compressed
+// keys (matches stacks.js). The header + cosigner keys are sent chunked.
+export const MULTISIG_MAX_PUBKEYS = 15
 
 export const PAYLOAD_TYPE = {
   INIT: 0x00,

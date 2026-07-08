@@ -58,11 +58,14 @@ function processGetAddrResponse(response: Buffer) {
   }
 }
 
-// Builds the GET_ADDR_MULTISIG payload:
-//   path(20) | hash_mode(1) | m(1) | n(1) | device_index(1) | cosigner keys ((n-1) * 33)
+// Builds the chunked GET_ADDR_MULTISIG payload. Larger key sets (up to n = 15)
+// exceed a single APDU, so it is sent over chunked transport:
+//   INIT chunk : path(20)                           -- the device's own path
+//   ADD/LAST   : confirm(1) | version(1) | hash_mode(1) | m(1) | n(1) | device_index(1)
+//                | cosigner keys ((n-1) * 33)        -- split into CHUNK_SIZE pieces
 // The device derives its own key and splices it in at `deviceKeyIndex`, so the
 // caller only supplies the OTHER cosigner keys (ordered, device slot omitted).
-function serializeMultisig(path: string, options: MultisigAddressOptions): Buffer {
+function serializeMultisigChunks(path: string, version: number, options: MultisigAddressOptions, confirm: boolean): Buffer[] {
   const { numRequired, deviceKeyIndex, cosignerPublicKeys } = options
   const hashMode = options.hashMode ?? MULTISIG_HASH_MODE.P2SH
 
@@ -84,8 +87,15 @@ function serializeMultisig(path: string, options: MultisigAddressOptions): Buffe
     }
   })
 
-  const header = Buffer.from([hashMode, numRequired, numPubkeys, deviceKeyIndex])
-  return Buffer.concat([serializePath(path), header, ...cosigners])
+  const header = Buffer.from([confirm ? 1 : 0, version, hashMode, numRequired, numPubkeys, deviceKeyIndex])
+  const body = Buffer.concat([header, ...cosigners])
+
+  // INIT chunk carries the path; the header + keys are chunked into the rest.
+  const chunks: Buffer[] = [serializePath(path)]
+  for (let i = 0; i < body.length; i += CHUNK_SIZE) {
+    chunks.push(body.subarray(i, i + CHUNK_SIZE))
+  }
+  return chunks
 }
 
 export default class StacksApp {
@@ -227,18 +237,29 @@ export default class StacksApp {
    * `version` is the c32 multisig version byte (20 mainnet `SM…`, 21 testnet `SN…`).
    */
   getMultisigAddressAndPubKey(path: string, version: AddressVersion, options: MultisigAddressOptions): Promise<ResponseAddress> {
-    const data = serializeMultisig(path, options)
-    return this.transport
-      .send(CLA, INS.GET_ADDR_MULTISIG, P1_VALUES.ONLY_RETRIEVE, version, data, [LedgerError.NoErrors])
-      .then(processGetAddrResponse, processErrorResponse)
+    const chunks = serializeMultisigChunks(path, version, options, false)
+    return this.sendMultisigChunks(chunks)
   }
 
   /** Same as {@link getMultisigAddressAndPubKey} but shows the address on-device for verification. */
   showMultisigAddressAndPubKey(path: string, version: AddressVersion, options: MultisigAddressOptions): Promise<ResponseAddress> {
-    const data = serializeMultisig(path, options)
-    return this.transport
-      .send(CLA, INS.GET_ADDR_MULTISIG, P1_VALUES.SHOW_ADDRESS_IN_DEVICE, version, data, [LedgerError.NoErrors])
-      .then(processGetAddrResponse, processErrorResponse)
+    const chunks = serializeMultisigChunks(path, version, options, true)
+    return this.sendMultisigChunks(chunks)
+  }
+
+  // Sends the multisig chunks in order (INIT, ADD…, LAST) and parses the final
+  // response ([device pubkey || c32 address]). P2 is 0; the chunk type is in P1.
+  private sendMultisigChunks(chunks: Buffer[]): Promise<ResponseAddress> {
+    const send = async () => {
+      // INIT chunk (the path); intermediate responses are just SW=9000.
+      let response = await this.transport.send(CLA, INS.GET_ADDR_MULTISIG, PAYLOAD_TYPE.INIT, 0, chunks[0]!, [LedgerError.NoErrors])
+      for (let i = 1; i < chunks.length; i += 1) {
+        const payloadType = i === chunks.length - 1 ? PAYLOAD_TYPE.LAST : PAYLOAD_TYPE.ADD
+        response = await this.transport.send(CLA, INS.GET_ADDR_MULTISIG, payloadType, 0, chunks[i]!, [LedgerError.NoErrors])
+      }
+      return response
+    }
+    return send().then(processGetAddrResponse, processErrorResponse)
   }
 
   signSendChunk(chunkIdx: number, chunkNum: number, chunk: Buffer, ins: number): Promise<ResponseSign> {
