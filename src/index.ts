@@ -14,7 +14,6 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  ******************************************************************************* */
-import Transport from '@ledgerhq/hw-transport'
 import type { AddressVersion } from '@stacks/transactions'
 
 import { encode } from 'varuint-bitcoin'
@@ -34,7 +33,15 @@ import {
   processErrorResponse,
 } from './common'
 import { serializePath } from './helper'
-import { MultisigAddressOptions, ResponseAddress, ResponseAppInfo, ResponseMasterFingerprint, ResponseSign, ResponseVersion } from './types'
+import {
+  LedgerTransport,
+  MultisigAddressOptions,
+  ResponseAddress,
+  ResponseAppInfo,
+  ResponseMasterFingerprint,
+  ResponseSign,
+  ResponseVersion,
+} from './types'
 
 export { LedgerError }
 export * from './types'
@@ -101,7 +108,7 @@ function serializeMultisigChunks(path: string, version: number, options: Multisi
 export default class StacksApp {
   transport
 
-  constructor(transport: Transport) {
+  constructor(transport: LedgerTransport) {
     this.transport = transport
     if (!transport) {
       throw new Error('Transport has not been defined')

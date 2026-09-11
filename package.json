@@ -34,7 +34,6 @@
     "upgrade": "pnpm dlx npm-check-updates -i"
   },
   "dependencies": {
-    "@ledgerhq/hw-transport": "^6.32.0",
     "@stacks/transactions": "^7.3.1",
     "varuint-bitcoin": "^2.0.0"
   },
