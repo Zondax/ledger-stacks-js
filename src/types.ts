@@ -62,8 +62,14 @@ export interface ResponseMasterFingerprint extends ResponseBase {
  * method lets it accept either a legacy `Transport` or a `DMKTransport` built on Ledger's
  * Device Management Kit, which replaces hw-transport ahead of the September 2026 cutoff.
  *
- * A `Transport` instance satisfies this interface as-is, so this is a widening: every
- * existing caller keeps compiling unchanged.
+ * A `Transport` instance satisfies this interface as-is, so passing one is unaffected.
+ *
+ * `send` must reject, with an error carrying the status word as `statusCode`, when the
+ * device replies with a status word not in `statusList` -- as hw-transport's `Transport`
+ * and `DMKTransport` from `@zondax/ledger-js` both do. The app relies on it: error
+ * responses are built from that `statusCode`, and multi-APDU flows such as the multisig
+ * address exchange do not re-check the status between chunks. A custom adapter that
+ * resolves with an unaccepted status word instead would report the wrong error.
  */
 export interface LedgerTransport {
   send: (

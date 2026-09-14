@@ -113,6 +113,10 @@ function serializeMultisigChunks(path: string, version: number, options: Multisi
  * it is public and its type is inferred from the constructor, so `app.transport.close()`
  * — fine today — would stop compiling. Inferring `T` from the argument keeps every member
  * of whatever was passed in, hw-transport's and a DMK transport's alike.
+ *
+ * Writing the type out as a bare `StacksApp` uses the default, so `transport` only has
+ * `send` there. Annotate `StacksApp<Transport>` (or the concrete transport class) to keep
+ * the rest -- this is the one case that no longer compiles as it did with hw-transport.
  */
 export default class StacksApp<T extends LedgerTransport = LedgerTransport> {
   transport: T
