@@ -105,10 +105,19 @@ function serializeMultisigChunks(path: string, version: number, options: Multisi
   return chunks
 }
 
-export default class StacksApp {
-  transport
+/**
+ * Generic in the transport so the public `transport` field keeps the caller's own type
+ * rather than collapsing to {@link LedgerTransport}.
+ *
+ * Without this, widening the constructor would narrow `app.transport` as a side effect:
+ * it is public and its type is inferred from the constructor, so `app.transport.close()`
+ * — fine today — would stop compiling. Inferring `T` from the argument keeps every member
+ * of whatever was passed in, hw-transport's and a DMK transport's alike.
+ */
+export default class StacksApp<T extends LedgerTransport = LedgerTransport> {
+  transport: T
 
-  constructor(transport: LedgerTransport) {
+  constructor(transport: T) {
     this.transport = transport
     if (!transport) {
       throw new Error('Transport has not been defined')
