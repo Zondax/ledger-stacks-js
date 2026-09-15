@@ -15,6 +15,7 @@
  *  limitations under the License.
  ******************************************************************************* */
 import type { AddressVersion } from '@stacks/transactions'
+import { DMKTransport } from '@zondax/ledger-js'
 
 import { encode } from 'varuint-bitcoin'
 
@@ -32,6 +33,7 @@ import {
   getVersion,
   processErrorResponse,
 } from './common'
+import { warnLegacyTransport } from './deprecation'
 import { serializePath } from './helper'
 import {
   LedgerTransport,
@@ -121,10 +123,35 @@ function serializeMultisigChunks(path: string, version: number, options: Multisi
 export default class StacksApp<T extends LedgerTransport = LedgerTransport> {
   transport: T
 
+  /**
+   * Constructs the app over a Device Management Kit session.
+   * @param transport - A `DMKTransport` from `@zondax/ledger-js`, bound to a connected DMK session.
+   */
+  // Conditional rather than `T & DMKTransport`: inference skips the identical `DMKTransport`
+  // constituent, which leaves `T` at its default and `app.transport` without DMK members.
+  constructor(transport: T extends DMKTransport ? T : never)
+  /**
+   * Constructs the app over any transport that can send an APDU.
+   *
+   * @deprecated Pass a `DMKTransport` from `@zondax/ledger-js` instead. Ledger deprecated
+   * `@ledgerhq/hw-transport` in favour of the Device Management Kit, and this overload -- which
+   * also admits hand-rolled transports -- is removed in the next major version. Using it logs a
+   * one-time warning.
+   *
+   * `DMKTransport` has private members, so only a real instance selects the overload above: an
+   * hw-transport `Transport` or a plain `{ send }` object lands here.
+   * @param transport - The transport mechanism to communicate with the device.
+   */
+  constructor(transport: T)
   constructor(transport: T) {
     this.transport = transport
     if (!transport) {
       throw new Error('Transport has not been defined')
+    }
+    // A deprecation notice, not a security check: a structural or cross-copy transport can
+    // defeat instanceof, and the transport runs in the caller's own process anyway.
+    if (!(transport instanceof DMKTransport)) {
+      warnLegacyTransport()
     }
   }
 
