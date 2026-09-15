@@ -14,8 +14,8 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  ******************************************************************************* */
-import Transport from '@ledgerhq/hw-transport'
 import type { AddressVersion } from '@stacks/transactions'
+import { DMKTransport } from '@zondax/ledger-js'
 
 import { encode } from 'varuint-bitcoin'
 
@@ -33,11 +33,26 @@ import {
   getVersion,
   processErrorResponse,
 } from './common'
+import { warnLegacyTransport } from './deprecation'
 import { serializePath } from './helper'
-import { MultisigAddressOptions, ResponseAddress, ResponseAppInfo, ResponseMasterFingerprint, ResponseSign, ResponseVersion } from './types'
+import {
+  LedgerTransport,
+  MultisigAddressOptions,
+  ResponseAddress,
+  ResponseAppInfo,
+  ResponseMasterFingerprint,
+  ResponseSign,
+  ResponseVersion,
+} from './types'
 
 export { LedgerError }
 export * from './types'
+
+/**
+ * Re-exported so a consumer can construct the transport this app now asks for without
+ * adding `@zondax/ledger-js` to their own dependencies purely to reach the adapter.
+ */
+export { DMKTransport } from '@zondax/ledger-js'
 
 function processGetAddrResponse(response: Buffer) {
   let partialResponse = response
@@ -98,13 +113,51 @@ function serializeMultisigChunks(path: string, version: number, options: Multisi
   return chunks
 }
 
-export default class StacksApp {
-  transport
+/**
+ * Generic in the transport so the public `transport` field keeps the caller's own type
+ * rather than collapsing to {@link LedgerTransport}.
+ *
+ * Without this, widening the constructor would narrow `app.transport` as a side effect:
+ * it is public and its type is inferred from the constructor, so `app.transport.close()`
+ * — fine today — would stop compiling. Inferring `T` from the argument keeps every member
+ * of whatever was passed in, hw-transport's and a DMK transport's alike.
+ *
+ * Writing the type out as a bare `StacksApp` uses the default, so `transport` only has
+ * `send` there. Annotate `StacksApp<Transport>` (or the concrete transport class) to keep
+ * the rest -- this is the one case that no longer compiles as it did with hw-transport.
+ */
+export default class StacksApp<T extends LedgerTransport = LedgerTransport> {
+  transport: T
 
-  constructor(transport: Transport) {
+  /**
+   * Constructs the app over a Device Management Kit session.
+   * @param transport - A `DMKTransport` from `@zondax/ledger-js`, bound to a connected DMK session.
+   */
+  // Conditional rather than `T & DMKTransport`: inference skips the identical `DMKTransport`
+  // constituent, which leaves `T` at its default and `app.transport` without DMK members.
+  constructor(transport: T extends DMKTransport ? T : never)
+  /**
+   * Constructs the app over any transport that can send an APDU.
+   *
+   * @deprecated Pass a `DMKTransport` from `@zondax/ledger-js` instead. Ledger deprecated
+   * `@ledgerhq/hw-transport` in favour of the Device Management Kit, and this overload -- which
+   * also admits hand-rolled transports -- is removed in the next major version. Using it logs a
+   * one-time warning.
+   *
+   * `DMKTransport` has private members, so only a real instance selects the overload above: an
+   * hw-transport `Transport` or a plain `{ send }` object lands here.
+   * @param transport - The transport mechanism to communicate with the device.
+   */
+  constructor(transport: T)
+  constructor(transport: T) {
     this.transport = transport
     if (!transport) {
       throw new Error('Transport has not been defined')
+    }
+    // A deprecation notice, not a security check: a structural or cross-copy transport can
+    // defeat instanceof, and the transport runs in the caller's own process anyway.
+    if (!(transport instanceof DMKTransport)) {
+      warnLegacyTransport()
     }
   }
 

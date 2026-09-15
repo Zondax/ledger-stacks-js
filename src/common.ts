@@ -1,4 +1,4 @@
-import Transport from '@ledgerhq/hw-transport'
+import { LedgerTransport } from './types'
 
 export const CLA = 0x09
 export const CHUNK_SIZE = 250
@@ -128,7 +128,7 @@ export function processErrorResponse(response?: any) {
   }
 }
 
-export function getVersion(transport: Transport) {
+export function getVersion(transport: LedgerTransport) {
   return transport.send(CLA, INS.GET_VERSION, 0, 0).then(response => {
     const errorCodeData = response.slice(-2)
     const returnCode = ((errorCodeData[0] ?? 0) * 256 + (errorCodeData[1] ?? 0)) as LedgerError
