@@ -48,6 +48,12 @@ import {
 export { LedgerError }
 export * from './types'
 
+/**
+ * Re-exported so a consumer can construct the transport this app now asks for without
+ * adding `@zondax/ledger-js` to their own dependencies purely to reach the adapter.
+ */
+export { DMKTransport } from '@zondax/ledger-js'
+
 function processGetAddrResponse(response: Buffer) {
   let partialResponse = response
 
